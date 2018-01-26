@@ -1,0 +1,2547 @@
+<div hidden="" by-polymer-bundler=""><!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+app-drawer is a navigation drawer that can slide in from the left or right.
+
+Example:
+
+Align the drawer at the start, which is left in LTR layouts (default):
+
+```html
+<app-drawer opened></app-drawer>
+```
+
+Align the drawer at the end:
+
+```html
+<app-drawer align="end" opened></app-drawer>
+```
+
+To make the contents of the drawer scrollable, create a wrapper for the scroll
+content, and apply height and overflow styles to it.
+
+```html
+<app-drawer>
+  <div style="height: 100%; overflow: auto;"></div>
+</app-drawer>
+```
+
+### Styling
+
+Custom property                  | Description                            | Default
+---------------------------------|----------------------------------------|--------------------
+`--app-drawer-width`             | Width of the drawer                    | 256px
+`--app-drawer-content-container` | Mixin for the drawer content container | {}
+`--app-drawer-scrim-background`  | Background for the scrim               | rgba(0, 0, 0, 0.5)
+
+**NOTE:** If you use <app-drawer> with <app-drawer-layout> and specify a value for
+`--app-drawer-width`, that value must be accessible by both elements. This can be done by
+defining the value on the `:host` that contains <app-drawer-layout> (or `html` if outside
+a shadow root):
+
+```css
+:host {
+  --app-drawer-width: 300px;
+}
+```
+
+@group App Elements
+@element app-drawer
+@demo app-drawer/demo/left-drawer.html Simple Left Drawer
+@demo app-drawer/demo/right-drawer.html Right Drawer with Icons
+-->
+
+<dom-module id="app-drawer" assetpath="../bower_components/app-layout/app-drawer/">
+  <template>
+    <style>
+      :host {
+        position: fixed;
+        top: -120px;
+        right: 0;
+        bottom: -120px;
+        left: 0;
+
+        visibility: hidden;
+
+        transition-property: visibility;
+      }
+
+      :host([opened]) {
+        visibility: visible;
+      }
+
+      :host([persistent]) {
+        width: var(--app-drawer-width, 256px);
+      }
+
+      :host([persistent][position=left]) {
+        right: auto;
+      }
+
+      :host([persistent][position=right]) {
+        left: auto;
+      }
+
+      #contentContainer {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+
+        width: var(--app-drawer-width, 256px);
+        padding: 120px 0;
+
+        transition-property: -webkit-transform;
+        transition-property: transform;
+        -webkit-transform: translate3d(-100%, 0, 0);
+        transform: translate3d(-100%, 0, 0);
+
+        background-color: #FFF;
+
+        @apply --app-drawer-content-container;
+      }
+
+      #contentContainer[persistent] {
+        width: 100%;
+      }
+
+      #contentContainer[position=right] {
+        right: 0;
+        left: auto;
+
+        -webkit-transform: translate3d(100%, 0, 0);
+        transform: translate3d(100%, 0, 0);
+      }
+
+      #contentContainer[swipe-open]::after {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 100%;
+
+        visibility: visible;
+
+        width: 20px;
+
+        content: '';
+      }
+
+      #contentContainer[swipe-open][position=right]::after {
+        right: 100%;
+        left: auto;
+      }
+
+      #contentContainer[opened] {
+        -webkit-transform: translate3d(0, 0, 0);
+        transform: translate3d(0, 0, 0);
+      }
+
+      #scrim {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+
+        transition-property: opacity;
+        -webkit-transform: translateZ(0);
+        transform:  translateZ(0);
+
+        opacity: 0;
+        background: var(--app-drawer-scrim-background, rgba(0, 0, 0, 0.5));
+      }
+
+      #scrim.visible {
+        opacity: 1;
+      }
+    </style>
+
+    <div id="scrim" on-click="close"></div>
+
+    <!-- HACK(keanulee): Bind attributes here (in addition to :host) for styling to workaround Safari
+    bug. https://bugs.webkit.org/show_bug.cgi?id=170762 -->
+    <div id="contentContainer" opened$="[[opened]]" persistent$="[[persistent]]" position$="[[position]]" swipe-open$="[[swipeOpen]]">
+      <slot></slot>
+    </div>
+  </template>
+
+  <script>
+
+    Polymer({
+      is: 'app-drawer',
+
+      properties: {
+        /**
+         * The opened state of the drawer.
+         */
+        opened: {
+          type: Boolean,
+          value: false,
+          notify: true,
+          reflectToAttribute: true
+        },
+
+        /**
+         * The drawer does not have a scrim and cannot be swiped close.
+         */
+        persistent: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+
+        /**
+         * The transition duration of the drawer in milliseconds.
+         */
+        transitionDuration: {
+          type: Number,
+          value: 200
+        },
+
+        /**
+         * The alignment of the drawer on the screen ('left', 'right', 'start' or 'end').
+         * 'start' computes to left and 'end' to right in LTR layout and vice versa in RTL
+         * layout.
+         */
+        align: {
+          type: String,
+          value: 'left'
+        },
+
+        /**
+         * The computed, read-only position of the drawer on the screen ('left' or 'right').
+         */
+        position: {
+          type: String,
+          readOnly: true,
+          reflectToAttribute: true
+        },
+
+        /**
+         * Create an area at the edge of the screen to swipe open the drawer.
+         */
+        swipeOpen: {
+          type: Boolean,
+          value: false,
+          reflectToAttribute: true
+        },
+
+        /**
+         * Trap keyboard focus when the drawer is opened and not persistent.
+         */
+        noFocusTrap: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Disables swiping on the drawer.
+         */
+        disableSwipe: {
+          type: Boolean,
+          value: false
+        }
+      },
+
+      observers: [
+        'resetLayout(position, isAttached)',
+        '_resetPosition(align, isAttached)',
+        '_styleTransitionDuration(transitionDuration)',
+        '_openedPersistentChanged(opened, persistent)'
+      ],
+
+      _translateOffset: 0,
+
+      _trackDetails: null,
+
+      _drawerState: 0,
+
+      _boundEscKeydownHandler: null,
+
+      _firstTabStop: null,
+
+      _lastTabStop: null,
+
+      attached: function() {
+        Polymer.RenderStatus.afterNextRender(this, function() {
+          this._boundEscKeydownHandler = this._escKeydownHandler.bind(this);
+          this.addEventListener('keydown', this._tabKeydownHandler.bind(this))
+
+          // Only listen for horizontal track so you can vertically scroll inside the drawer.
+          this.listen(this, 'track', '_track');
+          this.setScrollDirection('y');
+        });
+
+        this.fire('app-reset-layout');
+      },
+
+      detached: function() {
+        document.removeEventListener('keydown', this._boundEscKeydownHandler);
+      },
+
+      /**
+       * Opens the drawer.
+       */
+      open: function() {
+        this.opened = true;
+      },
+
+      /**
+       * Closes the drawer.
+       */
+      close: function() {
+        this.opened = false;
+      },
+
+      /**
+       * Toggles the drawer open and close.
+       */
+      toggle: function() {
+        this.opened = !this.opened;
+      },
+
+      /**
+       * Gets the width of the drawer.
+       *
+       * @return {number} The width of the drawer in pixels.
+       */
+      getWidth: function() {
+        return this.$.contentContainer.offsetWidth;
+      },
+
+      _isRTL: function() {
+        return window.getComputedStyle(this).direction === 'rtl';
+      },
+
+      _resetPosition: function() {
+        switch (this.align) {
+          case 'start':
+            this._setPosition(this._isRTL() ? 'right' : 'left');
+            return;
+          case 'end':
+            this._setPosition(this._isRTL() ? 'left' : 'right');
+            return;
+        }
+        this._setPosition(this.align);
+      },
+
+      _escKeydownHandler: function(event) {
+        var ESC_KEYCODE = 27;
+        if (event.keyCode === ESC_KEYCODE) {
+          // Prevent any side effects if app-drawer closes.
+          event.preventDefault();
+          this.close();
+        }
+      },
+
+      _track: function(event) {
+        if (this.persistent || this.disableSwipe) {
+          return;
+        }
+
+        // Disable user selection on desktop.
+        event.preventDefault();
+
+        switch (event.detail.state) {
+          case 'start':
+            this._trackStart(event);
+            break;
+          case 'track':
+            this._trackMove(event);
+            break;
+          case 'end':
+            this._trackEnd(event);
+            break;
+        }
+      },
+
+      _trackStart: function(event) {
+        this._drawerState = this._DRAWER_STATE.TRACKING;
+
+        // Disable transitions since style attributes will reflect user track events.
+        this._styleTransitionDuration(0);
+        this.style.visibility = 'visible';
+
+        var rect = this.$.contentContainer.getBoundingClientRect();
+        if (this.position === 'left') {
+          this._translateOffset = rect.left;
+        } else {
+          this._translateOffset = rect.right - window.innerWidth;
+        }
+
+        this._trackDetails = [];
+      },
+
+      _trackMove: function(event) {
+        this._translateDrawer(event.detail.dx + this._translateOffset);
+
+        // Use Date.now() since event.timeStamp is inconsistent across browsers (e.g. most
+        // browsers use milliseconds but FF 44 uses microseconds).
+        this._trackDetails.push({
+          dx: event.detail.dx,
+          timeStamp: Date.now()
+        });
+      },
+
+      _trackEnd: function(event) {
+        var x = event.detail.dx + this._translateOffset;
+        var drawerWidth = this.getWidth();
+        var isPositionLeft = this.position === 'left';
+        var isInEndState = isPositionLeft ? (x >= 0 || x <= -drawerWidth) :
+          (x <= 0 || x >= drawerWidth);
+
+        if (!isInEndState) {
+          // No longer need the track events after this method returns - allow them to be GC'd.
+          var trackDetails = this._trackDetails;
+          this._trackDetails = null;
+
+          this._flingDrawer(event, trackDetails);
+          if (this._drawerState === this._DRAWER_STATE.FLINGING) {
+            return;
+          }
+        }
+
+        // If the drawer is not flinging, toggle the opened state based on the position of
+        // the drawer.
+        var halfWidth = drawerWidth / 2;
+        if (event.detail.dx < -halfWidth) {
+          this.opened = this.position === 'right';
+        } else if (event.detail.dx > halfWidth) {
+          this.opened = this.position === 'left';
+        }
+
+        if (isInEndState) {
+          this.debounce('_resetDrawerState', this._resetDrawerState);
+        } else {
+          this.debounce('_resetDrawerState', this._resetDrawerState, this.transitionDuration);
+        }
+
+        this._styleTransitionDuration(this.transitionDuration);
+        this._resetDrawerTranslate();
+        this.style.visibility = '';
+      },
+
+      _calculateVelocity: function(event, trackDetails) {
+        // Find the oldest track event that is within 100ms using binary search.
+        var now = Date.now();
+        var timeLowerBound = now - 100;
+        var trackDetail;
+        var min = 0;
+        var max = trackDetails.length - 1;
+
+        while (min <= max) {
+          // Floor of average of min and max.
+          var mid = (min + max) >> 1;
+          var d = trackDetails[mid];
+          if (d.timeStamp >= timeLowerBound) {
+            trackDetail = d;
+            max = mid - 1;
+          } else {
+            min = mid + 1;
+          }
+        }
+
+        if (trackDetail) {
+          var dx = event.detail.dx - trackDetail.dx;
+          var dt = (now - trackDetail.timeStamp) || 1;
+          return dx / dt;
+        }
+        return 0;
+      },
+
+      _flingDrawer: function(event, trackDetails) {
+        var velocity = this._calculateVelocity(event, trackDetails);
+
+        // Do not fling if velocity is not above a threshold.
+        if (Math.abs(velocity) < this._MIN_FLING_THRESHOLD) {
+          return;
+        }
+
+        this._drawerState = this._DRAWER_STATE.FLINGING;
+
+        var x = event.detail.dx + this._translateOffset;
+        var drawerWidth = this.getWidth();
+        var isPositionLeft = this.position === 'left';
+        var isVelocityPositive = velocity > 0;
+        var isClosingLeft = !isVelocityPositive && isPositionLeft;
+        var isClosingRight = isVelocityPositive && !isPositionLeft;
+        var dx;
+        if (isClosingLeft) {
+          dx = -(x + drawerWidth);
+        } else if (isClosingRight) {
+          dx = (drawerWidth - x);
+        } else {
+          dx = -x;
+        }
+
+        // Enforce a minimum transition velocity to make the drawer feel snappy.
+        if (isVelocityPositive) {
+          velocity = Math.max(velocity, this._MIN_TRANSITION_VELOCITY);
+          this.opened = this.position === 'left';
+        } else {
+          velocity = Math.min(velocity, -this._MIN_TRANSITION_VELOCITY);
+          this.opened = this.position === 'right';
+        }
+
+        // Calculate the amount of time needed to finish the transition based on the
+        // initial slope of the timing function.
+        var t = this._FLING_INITIAL_SLOPE * dx / velocity
+        this._styleTransitionDuration(t);
+        this._styleTransitionTimingFunction(this._FLING_TIMING_FUNCTION);
+
+        this._resetDrawerTranslate();
+        this.debounce('_resetDrawerState', this._resetDrawerState, t);
+      },
+
+      _styleTransitionDuration: function(duration) {
+        this.style.transitionDuration = duration + 'ms';
+        this.$.contentContainer.style.transitionDuration = duration + 'ms';
+        this.$.scrim.style.transitionDuration = duration + 'ms';
+      },
+
+      _styleTransitionTimingFunction: function(timingFunction) {
+        this.$.contentContainer.style.transitionTimingFunction = timingFunction;
+        this.$.scrim.style.transitionTimingFunction = timingFunction;
+      },
+
+      _translateDrawer: function(x) {
+        var drawerWidth = this.getWidth();
+
+        if (this.position === 'left') {
+          x = Math.max(-drawerWidth, Math.min(x, 0));
+          this.$.scrim.style.opacity = 1 + x / drawerWidth;
+        } else {
+          x = Math.max(0, Math.min(x, drawerWidth));
+          this.$.scrim.style.opacity = 1 - x / drawerWidth;
+        }
+
+        this.translate3d(x + 'px', '0', '0', this.$.contentContainer);
+      },
+
+      _resetDrawerTranslate: function() {
+        this.$.scrim.style.opacity = '';
+        this.transform('', this.$.contentContainer);
+      },
+
+      _resetDrawerState: function() {
+        var oldState = this._drawerState;
+
+        // If the drawer was flinging, we need to reset the style attributes.
+        if (oldState === this._DRAWER_STATE.FLINGING) {
+          this._styleTransitionDuration(this.transitionDuration);
+          this._styleTransitionTimingFunction('');
+          this.style.visibility = '';
+        }
+
+        if (this.opened) {
+          this._drawerState = this.persistent ?
+            this._DRAWER_STATE.OPENED_PERSISTENT : this._DRAWER_STATE.OPENED;
+        } else {
+          this._drawerState = this._DRAWER_STATE.CLOSED;
+        }
+
+        if (oldState !== this._drawerState) {
+          if (this._drawerState === this._DRAWER_STATE.OPENED) {
+            this._setKeyboardFocusTrap();
+            document.addEventListener('keydown', this._boundEscKeydownHandler);
+            document.body.style.overflow = 'hidden';
+          } else {
+            document.removeEventListener('keydown', this._boundEscKeydownHandler);
+            document.body.style.overflow = '';
+          }
+
+          // Don't fire the event on initial load.
+          if (oldState !== this._DRAWER_STATE.INIT) {
+            this.fire('app-drawer-transitioned');
+          }
+        }
+      },
+
+      /**
+       * Resets the layout.
+       *
+       * @method resetLayout
+       */
+      resetLayout: function() {
+        this.fire('app-reset-layout');
+      },
+
+      _setKeyboardFocusTrap: function() {
+        if (this.noFocusTrap) {
+          return;
+        }
+
+        // NOTE: Unless we use /deep/ (which we shouldn't since it's deprecated), this will
+        // not select focusable elements inside shadow roots.
+        var focusableElementsSelector = [
+            'a[href]:not([tabindex="-1"])',
+            'area[href]:not([tabindex="-1"])',
+            'input:not([disabled]):not([tabindex="-1"])',
+            'select:not([disabled]):not([tabindex="-1"])',
+            'textarea:not([disabled]):not([tabindex="-1"])',
+            'button:not([disabled]):not([tabindex="-1"])',
+            'iframe:not([tabindex="-1"])',
+            '[tabindex]:not([tabindex="-1"])',
+            '[contentEditable=true]:not([tabindex="-1"])'
+          ].join(',');
+        var focusableElements = Polymer.dom(this).querySelectorAll(focusableElementsSelector);
+
+        if (focusableElements.length > 0) {
+          this._firstTabStop = focusableElements[0];
+          this._lastTabStop = focusableElements[focusableElements.length - 1];
+        } else {
+          // Reset saved tab stops when there are no focusable elements in the drawer.
+          this._firstTabStop = null;
+          this._lastTabStop = null;
+        }
+
+        // Focus on app-drawer if it has non-zero tabindex. Otherwise, focus the first focusable
+        // element in the drawer, if it exists. Use the tabindex attribute since the this.tabIndex
+        // property in IE/Edge returns 0 (instead of -1) when the attribute is not set.
+        var tabindex = this.getAttribute('tabindex');
+        if (tabindex && parseInt(tabindex, 10) > -1) {
+          this.focus();
+        } else if (this._firstTabStop) {
+          this._firstTabStop.focus();
+        }
+      },
+
+      _tabKeydownHandler: function(event) {
+        if (this.noFocusTrap) {
+          return;
+        }
+
+        var TAB_KEYCODE = 9;
+        if (this._drawerState === this._DRAWER_STATE.OPENED && event.keyCode === TAB_KEYCODE) {
+          if (event.shiftKey) {
+            if (this._firstTabStop && Polymer.dom(event).localTarget === this._firstTabStop) {
+              event.preventDefault();
+              this._lastTabStop.focus();
+            }
+          } else {
+            if (this._lastTabStop && Polymer.dom(event).localTarget === this._lastTabStop) {
+              event.preventDefault();
+              this._firstTabStop.focus();
+            }
+          }
+        }
+      },
+
+      _openedPersistentChanged: function(opened, persistent) {
+        this.toggleClass('visible', opened && !persistent, this.$.scrim);
+
+        // Use a debounce timer instead of transitionend since transitionend won't fire when
+        // app-drawer is display: none.
+        this.debounce('_resetDrawerState', this._resetDrawerState, this.transitionDuration);
+      },
+
+      _MIN_FLING_THRESHOLD: 0.2,
+
+      _MIN_TRANSITION_VELOCITY: 1.2,
+
+      _FLING_TIMING_FUNCTION: 'cubic-bezier(0.667, 1, 0.667, 1)',
+
+      _FLING_INITIAL_SLOPE: 1.5,
+
+      _DRAWER_STATE: {
+        INIT: 0,
+        OPENED: 1,
+        OPENED_PERSISTENT: 2,
+        CLOSED: 3,
+        TRACKING: 4,
+        FLINGING: 5
+      }
+
+      /**
+       * Fired when the layout of app-drawer has changed.
+       *
+       * @event app-reset-layout
+       */
+
+      /**
+       * Fired when app-drawer has finished transitioning.
+       *
+       * @event app-drawer-transitioned
+       */
+    });
+  </script>
+</dom-module>
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+`iron-media-query` can be used to data bind to a CSS media query.
+The `query` property is a bare CSS media query.
+The `query-matches` property is a boolean representing whether the page matches that media query.
+
+Example:
+
+    <iron-media-query query="(min-width: 600px)" query-matches="{{queryMatches}}"></iron-media-query>
+
+@group Iron Elements
+@demo demo/index.html
+@hero hero.svg
+@element iron-media-query
+-->
+
+<script>
+
+  Polymer({
+
+    is: 'iron-media-query',
+
+    properties: {
+
+      /**
+       * The Boolean return value of the media query.
+       */
+      queryMatches: {
+        type: Boolean,
+        value: false,
+        readOnly: true,
+        notify: true
+      },
+
+      /**
+       * The CSS media query to evaluate.
+       */
+      query: {
+        type: String,
+        observer: 'queryChanged'
+      },
+
+      /**
+       * If true, the query attribute is assumed to be a complete media query
+       * string rather than a single media feature.
+       */
+      full: {
+        type: Boolean,
+        value: false
+      },
+
+      /**
+       * @type {function(MediaQueryList)}
+       */
+      _boundMQHandler: {
+        value: function() {
+          return this.queryHandler.bind(this);
+        }
+      },
+
+      /**
+       * @type {MediaQueryList}
+       */
+      _mq: {
+        value: null
+      }
+    },
+
+    attached: function() {
+      this.style.display = 'none';
+      this.queryChanged();
+    },
+
+    detached: function() {
+      this._remove();
+    },
+
+    _add: function() {
+      if (this._mq) {
+        this._mq.addListener(this._boundMQHandler);
+      }
+    },
+
+    _remove: function() {
+      if (this._mq) {
+        this._mq.removeListener(this._boundMQHandler);
+      }
+      this._mq = null;
+    },
+
+    queryChanged: function() {
+      this._remove();
+      var query = this.query;
+      if (!query) {
+        return;
+      }
+      if (!this.full && query[0] !== '(') {
+        query = '(' + query + ')';
+      }
+      this._mq = window.matchMedia(query);
+      this._add();
+      this.queryHandler(this._mq);
+    },
+
+    queryHandler: function(mq) {
+      this._setQueryMatches(mq.matches);
+    }
+
+  });
+
+</script>
+<!--
+app-drawer-layout is a wrapper element that positions an app-drawer and other content. When
+the viewport width is smaller than `responsiveWidth`, this element changes to narrow layout.
+In narrow layout, the drawer will be stacked on top of the main content. The drawer will slide
+in/out to hide/reveal the main content.
+
+By default the drawer is aligned to the start, which is left in LTR layouts:
+
+```html
+<app-drawer-layout>
+  <app-drawer slot="drawer">
+    drawer content
+  </app-drawer>
+  <div>
+    main content
+  </div>
+</app-drawer-layout>
+```
+
+Align the drawer at the end:
+
+```html
+<app-drawer-layout>
+  <app-drawer slot="drawer" align="end">
+     drawer content
+  </app-drawer>
+  <div>
+    main content
+  </div>
+</app-drawer-layout>
+```
+
+With an app-header-layout:
+
+```html
+<app-drawer-layout>
+  <app-drawer slot="drawer">
+    drawer-content
+  </app-drawer>
+  <app-header-layout>
+    <app-header slot="header">
+      <app-toolbar>
+        <div main-title>App name</div>
+      </app-toolbar>
+    </app-header>
+
+    main content
+
+  </app-header-layout>
+</app-drawer-layout>
+```
+
+Add the `drawer-toggle` attribute to elements inside `app-drawer-layout` that toggle the drawer on click events:
+
+```html
+<app-drawer-layout>
+  <app-drawer slot="drawer">
+    drawer-content
+  </app-drawer>
+  <app-header-layout>
+    <app-header slot="header">
+      <app-toolbar>
+        <paper-icon-button icon="menu" drawer-toggle></paper-icon-button>
+        <div main-title>App name</div>
+      </app-toolbar>
+    </app-header>
+
+    main content
+
+  </app-header-layout>
+</app-drawer-layout>
+```
+
+**NOTE:** With app-layout 2.0, the `drawer-toggle` element will not be automatically hidden
+when app-drawer-layout is not in narrow layout. To add this, add the following CSS rule where
+app-drawer-layout is used:
+
+```css
+app-drawer-layout:not([narrow]) [drawer-toggle] {
+  display: none;
+}
+```
+
+Add the `fullbleed` attribute to app-drawer-layout to make it fit the size of its container:
+
+```html
+<app-drawer-layout fullbleed>
+  <app-drawer slot="drawer">
+     drawer content
+  </app-drawer>
+  <div>
+    main content
+  </div>
+</app-drawer-layout>
+```
+
+### Styling
+
+Custom property                          | Description                          | Default
+-----------------------------------------|--------------------------------------|---------
+`--app-drawer-width`                     | Width of the drawer                  | 256px
+`--app-drawer-layout-content-transition` | Transition for the content container | none
+
+**NOTE:** If you use <app-drawer> with <app-drawer-layout> and specify a value for
+`--app-drawer-width`, that value must be accessible by both elements. This can be done by
+defining the value on the `:host` that contains <app-drawer-layout> (or `html` if outside
+a shadow root):
+
+```css
+:host {
+  --app-drawer-width: 300px;
+}
+```
+
+@group App Elements
+@element app-drawer-layout
+@demo app-drawer-layout/demo/simple-drawer.html Simple Demo
+@demo app-drawer-layout/demo/two-drawers.html Two drawers
+-->
+
+<dom-module id="app-drawer-layout" assetpath="../bower_components/app-layout/app-drawer-layout/">
+  <template>
+    <style>
+      :host {
+        display: block;
+        /**
+         * Force app-drawer-layout to have its own stacking context so that its parent can
+         * control the stacking of it relative to other elements.
+         */
+        position: relative;
+        z-index: 0;
+      }
+
+      :host ::slotted([slot=drawer]) {
+        z-index: 1;
+      }
+
+      :host([fullbleed]) {
+        @apply --layout-fit;
+      }
+
+      #contentContainer {
+        /* Create a stacking context here so that all children appear below the header. */
+        position: relative;
+        z-index: 0;
+        height: 100%;
+        transition: var(--app-drawer-layout-content-transition, none);
+      }
+
+      #contentContainer[drawer-position=left] {
+        margin-left: var(--app-drawer-width, 256px);
+      }
+
+      #contentContainer[drawer-position=right] {
+        margin-right: var(--app-drawer-width, 256px);
+      }
+    </style>
+
+    <slot id="drawerSlot" name="drawer"></slot>
+
+    <div id="contentContainer" drawer-position$="[[_drawerPosition]]">
+      <slot></slot>
+    </div>
+
+    <iron-media-query query="[[_computeMediaQuery(forceNarrow, responsiveWidth)]]" on-query-matches-changed="_onQueryMatchesChanged"></iron-media-query>
+  </template>
+
+  <script>
+    Polymer({
+      is: 'app-drawer-layout',
+
+      behaviors: [
+        Polymer.AppLayoutBehavior
+      ],
+
+      properties: {
+        /**
+         * If true, ignore `responsiveWidth` setting and force the narrow layout.
+         */
+        forceNarrow: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * If the viewport's width is smaller than this value, the panel will change to narrow
+         * layout. In the mode the drawer will be closed.
+         */
+        responsiveWidth: {
+          type: String,
+          value: '640px'
+        },
+
+        /**
+         * Returns true if it is in narrow layout. This is useful if you need to show/hide
+         * elements based on the layout.
+         */
+        narrow: {
+          type: Boolean,
+          reflectToAttribute: true,
+          readOnly: true,
+          notify: true
+        },
+
+        /**
+         * If true, the drawer will initially be opened when in narrow layout mode.
+         */
+        openedWhenNarrow: {
+          type: Boolean,
+          value: false
+        },
+
+        _drawerPosition: {
+          type: String
+        }
+      },
+
+      listeners: {
+        'click': '_clickHandler'
+      },
+
+      observers: [
+        '_narrowChanged(narrow)'
+      ],
+
+      /**
+       * A reference to the app-drawer element.
+       *
+       * @property drawer
+       */
+      get drawer() {
+        return Polymer.dom(this.$.drawerSlot).getDistributedNodes()[0];
+      },
+
+      attached: function() {
+        // Disable drawer transitions until after app-drawer-layout sets the initial opened state.
+        var drawer = this.drawer;
+        if (drawer) {
+          this._savedDrawerTransitionDuration = drawer.transitionDuration;
+          drawer.transitionDuration = 0;
+        }
+      },
+
+      _clickHandler: function(e) {
+        var target = Polymer.dom(e).localTarget;
+        if (target && target.hasAttribute('drawer-toggle')) {
+          var drawer = this.drawer;
+          if (drawer && !drawer.persistent) {
+            drawer.toggle();
+          }
+        }
+      },
+
+      _updateLayoutStates: function() {
+        var drawer = this.drawer;
+        if (!drawer) {
+          return;
+        }
+
+        this._drawerPosition = this.narrow ? null : drawer.position;
+        if (this._drawerNeedsReset) {
+          if (this.narrow) {
+            drawer.opened = this.openedWhenNarrow;
+            drawer.persistent = false;
+          } else {
+            drawer.opened = drawer.persistent = true;
+          }
+          if (this._savedDrawerTransitionDuration) {
+            // Enable drawer transitions after app-drawer-layout sets the initial opened state.
+            Polymer.RenderStatus.afterNextRender(this, function() {
+              drawer.transitionDuration = this._savedDrawerTransitionDuration;
+              this._savedDrawerTransitionDuration = 0;
+            });
+          }
+          this._drawerNeedsReset = false;
+        }
+      },
+
+      _narrowChanged: function() {
+        this._drawerNeedsReset = true;
+        this.resetLayout();
+      },
+
+      _onQueryMatchesChanged: function(event) {
+        this._setNarrow(event.detail.value);
+      },
+
+      _computeMediaQuery: function(forceNarrow, responsiveWidth) {
+        return forceNarrow ? '(min-width: 0px)' : '(max-width: ' + responsiveWidth + ')';
+      }
+    });
+  </script>
+</dom-module>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  /**
+   * While scrolling down, fade in the rear background layer and fade out the front background
+   * layer (opacity interpolated based on scroll position).
+   */
+  Polymer.AppLayout.registerEffect('blend-background', {
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    setUp: function setUp() {
+      var fx = {};
+      fx.backgroundFrontLayer = this._getDOMRef('backgroundFrontLayer');
+      fx.backgroundRearLayer = this._getDOMRef('backgroundRearLayer');
+      fx.backgroundFrontLayer.style.willChange = 'opacity';
+      fx.backgroundFrontLayer.style.transform = 'translateZ(0)';
+      fx.backgroundRearLayer.style.willChange = 'opacity';
+      fx.backgroundRearLayer.style.transform = 'translateZ(0)';
+      fx.backgroundRearLayer.style.opacity = 0;
+      this._fxBlendBackground = fx;
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    run: function run(p, y) {
+      var fx = this._fxBlendBackground;
+      fx.backgroundFrontLayer.style.opacity = 1 - p;
+      fx.backgroundRearLayer.style.opacity = p;
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    tearDown: function tearDown() {
+      delete this._fxBlendBackground;
+    }
+  });
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  /**
+   * Upon scrolling past a threshold, fade in the rear background layer and fade out the front
+   * background layer (opacity CSS transitioned over time).
+   *
+   *
+   */
+  Polymer.AppLayout.registerEffect('fade-background', {
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    setUp: function setUp(config) {
+      var fx = {};
+      var duration = config.duration || '0.5s';
+      fx.backgroundFrontLayer = this._getDOMRef('backgroundFrontLayer');
+      fx.backgroundRearLayer = this._getDOMRef('backgroundRearLayer');
+      fx.backgroundFrontLayer.style.willChange = 'opacity';
+      fx.backgroundFrontLayer.style.webkitTransform = 'translateZ(0)';
+      fx.backgroundFrontLayer.style.transitionProperty = 'opacity';
+      fx.backgroundFrontLayer.style.transitionDuration = duration;
+      fx.backgroundRearLayer.style.willChange = 'opacity';
+      fx.backgroundRearLayer.style.webkitTransform = 'translateZ(0)';
+      fx.backgroundRearLayer.style.transitionProperty = 'opacity';
+      fx.backgroundRearLayer.style.transitionDuration = duration;
+      this._fxFadeBackground = fx;
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    run: function run(p, y) {
+      var fx = this._fxFadeBackground;
+      if (p >= 1) {
+        fx.backgroundFrontLayer.style.opacity = 0;
+        fx.backgroundRearLayer.style.opacity = 1;
+      } else {
+        fx.backgroundFrontLayer.style.opacity = 1;
+        fx.backgroundRearLayer.style.opacity = 0;
+      }
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    tearDown: function tearDown() {
+      delete this._fxFadeBackground;
+    }
+  });
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  /**
+   * Toggles the shadow property in app-header when content is scrolled to create a sense of depth
+   * between the element and the content underneath.
+   */
+  Polymer.AppLayout.registerEffect('waterfall', {
+    /**
+     *  @this Polymer.AppLayout.ElementWithBackground
+     */
+    run: function run() {
+      this.shadow = this.isOnScreen() && this.isContentBelow();
+    }
+  });
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  (function() {
+    function interpolate(progress, points, fn, ctx) {
+      fn.apply(ctx, points.map(function(point) {
+        return point[0] + (point[1] - point[0]) * progress;
+      }));
+    }
+
+    /**
+     * Transform the font size of a designated title element between two values based on the scroll
+     * position.
+     */
+    Polymer.AppLayout.registerEffect('resize-title', {
+      /** @this Polymer.AppLayout.ElementWithBackground */
+      setUp: function setUp() {
+        var title = this._getDOMRef('mainTitle');
+        var condensedTitle = this._getDOMRef('condensedTitle');
+
+        if (!condensedTitle) {
+          console.warn('Scroll effect `resize-title`: undefined `condensed-title`');
+          return false;
+        }
+        if (!title) {
+          console.warn('Scroll effect `resize-title`: undefined `main-title`');
+          return false;
+        }
+
+        condensedTitle.style.willChange = 'opacity';
+        condensedTitle.style.webkitTransform = 'translateZ(0)';
+        condensedTitle.style.transform = 'translateZ(0)';
+        condensedTitle.style.webkitTransformOrigin = 'left top';
+        condensedTitle.style.transformOrigin = 'left top';
+
+        title.style.willChange = 'opacity';
+        title.style.webkitTransformOrigin = 'left top';
+        title.style.transformOrigin = 'left top';
+        title.style.webkitTransform = 'translateZ(0)';
+        title.style.transform = 'translateZ(0)';
+
+        var titleClientRect = title.getBoundingClientRect();
+        var condensedTitleClientRect = condensedTitle.getBoundingClientRect();
+        var fx = {};
+
+        fx.scale = parseInt(window.getComputedStyle(condensedTitle)['font-size'], 10) /
+            parseInt(window.getComputedStyle(title)['font-size'], 10);
+        fx.titleDX = titleClientRect.left - condensedTitleClientRect.left;
+        fx.titleDY = titleClientRect.top - condensedTitleClientRect.top;
+        fx.condensedTitle = condensedTitle;
+        fx.title = title;
+
+        this._fxResizeTitle = fx;
+      },
+      /** @this PolymerElement */
+      run: function run(p, y) {
+        var fx = this._fxResizeTitle;
+        if (!this.condenses) {
+          y = 0;
+        }
+        if (p >= 1) {
+          fx.title.style.opacity = 0;
+          fx.condensedTitle.style.opacity = 1;
+        } else {
+          fx.title.style.opacity = 1;
+          fx.condensedTitle.style.opacity = 0;
+        }
+        interpolate(Math.min(1, p), [ [1, fx.scale], [0, -fx.titleDX], [y, y-fx.titleDY] ],
+          function(scale, translateX, translateY) {
+            this.transform('translate(' + translateX + 'px, ' + translateY + 'px) ' +
+                'scale3d(' + scale + ', ' + scale + ', 1)', fx.title);
+          }, this);
+      },
+      /** @this Polymer.AppLayout.ElementWithBackground */
+      tearDown: function tearDown() {
+        delete this._fxResizeTitle;
+      }
+    });
+  })();
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  /**
+   * Vertically translate the background based on a factor of the scroll position.
+   */
+  Polymer.AppLayout.registerEffect('parallax-background', {
+    /**
+     * @param {{scalar: string}} config
+     * @this Polymer.AppLayout.ElementWithBackground
+     */
+    setUp: function setUp(config) {
+      var fx = {};
+      var scalar = parseFloat(config.scalar);
+      fx.background = this._getDOMRef('background');
+      fx.backgroundFrontLayer = this._getDOMRef('backgroundFrontLayer');
+      fx.backgroundRearLayer = this._getDOMRef('backgroundRearLayer');
+      fx.deltaBg = fx.backgroundFrontLayer.offsetHeight - fx.background.offsetHeight;
+      if (fx.deltaBg === 0) {
+        if (isNaN(scalar)) {
+          scalar = 0.8;
+        }
+        fx.deltaBg = this._dHeight * scalar;
+      } else {
+        if (isNaN(scalar)) {
+          scalar = 1;
+        }
+        fx.deltaBg = fx.deltaBg * scalar;
+      }
+      this._fxParallaxBackground = fx;
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    run: function run(p, y) {
+      var fx = this._fxParallaxBackground;
+      this.transform('translate3d(0px, ' + (fx.deltaBg * Math.min(1, p)) + 'px, 0px)', fx.backgroundFrontLayer);
+      if (fx.backgroundRearLayer) {
+        this.transform('translate3d(0px, ' + (fx.deltaBg * Math.min(1, p)) + 'px, 0px)', fx.backgroundRearLayer);
+      }
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    tearDown: function tearDown() {
+      delete this._fxParallaxBackground;
+    }
+  });
+</script>
+<script>
+  /**
+   * Shorthand for the waterfall, resize-title, blend-background, and parallax-background effects.
+   */
+  Polymer.AppLayout.registerEffect('material', {
+    /**
+     * @this Polymer.AppLayout.ElementWithBackground
+     */
+    setUp: function setUp() {
+      this.effects = 'waterfall resize-title blend-background parallax-background';
+      return false;
+    }
+  });
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><script>
+  /**
+   * Upon scrolling past a threshold, CSS transition the font size of a designated title element
+   * between two values.
+   */
+  Polymer.AppLayout.registerEffect('resize-snapped-title', {
+    /**
+     * @this Polymer.AppLayout.ElementWithBackground
+     */
+    setUp: function setUp(config) {
+      var title = this._getDOMRef('mainTitle');
+      var condensedTitle = this._getDOMRef('condensedTitle');
+      var duration = config.duration || '0.2s';
+      var fx = {};
+
+      if (!condensedTitle) {
+        console.warn('Scroll effect `resize-snapped-title`: undefined `condensed-title`');
+        return false;
+      }
+      if (!title) {
+        console.warn('Scroll effect `resize-snapped-title`: undefined `main-title`');
+        return false;
+      }
+
+      title.style.transitionProperty = 'opacity';
+      title.style.transitionDuration = duration;
+      condensedTitle.style.transitionProperty = 'opacity';
+      condensedTitle.style.transitionDuration = duration;
+      fx.condensedTitle = condensedTitle;
+      fx.title = title;
+      this._fxResizeSnappedTitle = fx;
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    run: function run(p, y) {
+      var fx = this._fxResizeSnappedTitle;
+      if (p > 0) {
+        fx.title.style.opacity = 0;
+        fx.condensedTitle.style.opacity = 1;
+      } else {
+        fx.title.style.opacity = 1;
+        fx.condensedTitle.style.opacity = 0;
+      }
+    },
+    /** @this Polymer.AppLayout.ElementWithBackground */
+    tearDown: function tearDown() {
+      var fx = this._fxResizeSnappedTitle;
+      fx.title.style.transition = '';
+      fx.condensedTitle.style.transition = '';
+      delete this._fxResizeSnappedTitle;
+    }
+  });
+</script>
+<!--
+@license
+Copyright (c) 2016 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+`iron-image` is an element for displaying an image that provides useful sizing and
+preloading options not found on the standard `<img>` tag.
+
+The `sizing` option allows the image to be either cropped (`cover`) or
+letterboxed (`contain`) to fill a fixed user-size placed on the element.
+
+The `preload` option prevents the browser from rendering the image until the
+image is fully loaded.  In the interim, either the element's CSS `background-color`
+can be be used as the placeholder, or the `placeholder` property can be
+set to a URL (preferably a data-URI, for instant rendering) for an
+placeholder image.
+
+The `fade` option (only valid when `preload` is set) will cause the placeholder
+image/color to be faded out once the image is rendered.
+
+Examples:
+
+  Basically identical to `<img src="...">` tag:
+
+    <iron-image src="http://lorempixel.com/400/400"></iron-image>
+
+  Will letterbox the image to fit:
+
+    <iron-image style="width:400px; height:400px;" sizing="contain"
+      src="http://lorempixel.com/600/400"></iron-image>
+
+  Will crop the image to fit:
+
+    <iron-image style="width:400px; height:400px;" sizing="cover"
+      src="http://lorempixel.com/600/400"></iron-image>
+
+  Will show light-gray background until the image loads:
+
+    <iron-image style="width:400px; height:400px; background-color: lightgray;"
+      sizing="cover" preload src="http://lorempixel.com/600/400"></iron-image>
+
+  Will show a base-64 encoded placeholder image until the image loads:
+
+    <iron-image style="width:400px; height:400px;" placeholder="data:image/gif;base64,..."
+      sizing="cover" preload src="http://lorempixel.com/600/400"></iron-image>
+
+  Will fade the light-gray background out once the image is loaded:
+
+    <iron-image style="width:400px; height:400px; background-color: lightgray;"
+      sizing="cover" preload fade src="http://lorempixel.com/600/400"></iron-image>
+
+Custom property | Description | Default
+----------------|-------------|----------
+`--iron-image-placeholder` | Mixin applied to #placeholder | `{}`
+`--iron-image-width` | Sets the width of the wrapped image | `auto`
+`--iron-image-height` | Sets the height of the wrapped image | `auto`
+
+@group Iron Elements
+@element iron-image
+@demo demo/index.html
+-->
+
+<dom-module id="iron-image" assetpath="../bower_components/iron-image/">
+  <template>
+    <style>
+      :host {
+        display: inline-block;
+        overflow: hidden;
+        position: relative;
+      }
+
+      #baseURIAnchor {
+        display: none;
+      }
+
+      #sizedImgDiv {
+        position: absolute;
+        top: 0px;
+        right: 0px;
+        bottom: 0px;
+        left: 0px;
+
+        display: none;
+      }
+
+      #img {
+        display: block;
+        width: var(--iron-image-width, auto);
+        height: var(--iron-image-height, auto);
+      }
+
+      :host([sizing]) #sizedImgDiv {
+        display: block;
+      }
+
+      :host([sizing]) #img {
+        display: none;
+      }
+
+      #placeholder {
+        position: absolute;
+        top: 0px;
+        right: 0px;
+        bottom: 0px;
+        left: 0px;
+
+        background-color: inherit;
+        opacity: 1;
+
+        @apply --iron-image-placeholder;
+      }
+
+      #placeholder.faded-out {
+        transition: opacity 0.5s linear;
+        opacity: 0;
+      }
+    </style>
+
+    <a id="baseURIAnchor" href="#"></a>
+    <div id="sizedImgDiv" role="img" hidden$="[[_computeImgDivHidden(sizing)]]" aria-hidden$="[[_computeImgDivARIAHidden(alt)]]" aria-label$="[[_computeImgDivARIALabel(alt, src)]]"></div>
+    <img id="img" alt$="[[alt]]" hidden$="[[_computeImgHidden(sizing)]]" crossorigin$="[[crossorigin]]" on-load="_imgOnLoad" on-error="_imgOnError">
+    <div id="placeholder" hidden$="[[_computePlaceholderHidden(preload, fade, loading, loaded)]]" class$="[[_computePlaceholderClassName(preload, fade, loading, loaded)]]"></div>
+  </template>
+
+  <script>
+    Polymer({
+      is: 'iron-image',
+
+      properties: {
+        /**
+         * The URL of an image.
+         */
+        src: {
+          type: String,
+          value: ''
+        },
+
+        /**
+         * A short text alternative for the image.
+         */
+        alt: {
+          type: String,
+          value: null
+        },
+
+        /**
+         * CORS enabled images support: https://developer.mozilla.org/en-US/docs/Web/HTML/CORS_enabled_image
+         */
+        crossorigin: {
+          type: String,
+          value: null
+        },
+
+        /**
+         * When true, the image is prevented from loading and any placeholder is
+         * shown.  This may be useful when a binding to the src property is known to
+         * be invalid, to prevent 404 requests.
+         */
+        preventLoad: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Sets a sizing option for the image.  Valid values are `contain` (full
+         * aspect ratio of the image is contained within the element and
+         * letterboxed) or `cover` (image is cropped in order to fully cover the
+         * bounds of the element), or `null` (default: image takes natural size).
+         */
+        sizing: {
+          type: String,
+          value: null,
+          reflectToAttribute: true
+        },
+
+        /**
+         * When a sizing option is used (`cover` or `contain`), this determines
+         * how the image is aligned within the element bounds.
+         */
+        position: {
+          type: String,
+          value: 'center'
+        },
+
+        /**
+         * When `true`, any change to the `src` property will cause the `placeholder`
+         * image to be shown until the new image has loaded.
+         */
+        preload: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * This image will be used as a background/placeholder until the src image has
+         * loaded.  Use of a data-URI for placeholder is encouraged for instant rendering.
+         */
+        placeholder: {
+          type: String,
+          value: null,
+          observer: '_placeholderChanged'
+        },
+
+        /**
+         * When `preload` is true, setting `fade` to true will cause the image to
+         * fade into place.
+         */
+        fade: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Read-only value that is true when the image is loaded.
+         */
+        loaded: {
+          notify: true,
+          readOnly: true,
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Read-only value that tracks the loading state of the image when the `preload`
+         * option is used.
+         */
+        loading: {
+          notify: true,
+          readOnly: true,
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Read-only value that indicates that the last set `src` failed to load.
+         */
+        error: {
+          notify: true,
+          readOnly: true,
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Can be used to set the width of image (e.g. via binding); size may also be
+         * set via CSS.
+         */
+        width: {
+          observer: '_widthChanged',
+          type: Number,
+          value: null
+        },
+
+        /**
+         * Can be used to set the height of image (e.g. via binding); size may also be
+         * set via CSS.
+         *
+         * @attribute height
+         * @type number
+         * @default null
+         */
+        height: {
+          observer: '_heightChanged',
+          type: Number,
+          value: null
+        },
+      },
+
+      observers: [
+        '_transformChanged(sizing, position)',
+        '_loadStateObserver(src, preventLoad)'
+      ],
+
+      created: function() {
+        this._resolvedSrc = '';
+      },
+
+      _imgOnLoad: function() {
+        if (this.$.img.src !== this._resolveSrc(this.src)) {
+          return;
+        }
+
+        this._setLoading(false);
+        this._setLoaded(true);
+        this._setError(false);
+      },
+
+      _imgOnError: function() {
+        if (this.$.img.src !== this._resolveSrc(this.src)) {
+          return;
+        }
+
+        this.$.img.removeAttribute('src');
+        this.$.sizedImgDiv.style.backgroundImage = '';
+
+        this._setLoading(false);
+        this._setLoaded(false);
+        this._setError(true);
+      },
+
+      _computePlaceholderHidden: function() {
+        return !this.preload || (!this.fade && !this.loading && this.loaded);
+      },
+
+      _computePlaceholderClassName: function() {
+        return (this.preload && this.fade && !this.loading && this.loaded) ? 'faded-out' : '';
+      },
+
+      _computeImgDivHidden: function() {
+        return !this.sizing;
+      },
+
+      _computeImgDivARIAHidden: function() {
+        return this.alt === '' ? 'true' : undefined;
+      },
+
+      _computeImgDivARIALabel: function() {
+        if (this.alt !== null) {
+          return this.alt;
+        }
+
+        // Polymer.ResolveUrl.resolveUrl will resolve '' relative to a URL x to
+        // that URL x, but '' is the default for src.
+        if (this.src === '') {
+          return '';
+        }
+
+        // NOTE: Use of `URL` was removed here because IE11 doesn't support
+        // constructing it. If this ends up being problematic, we should
+        // consider reverting and adding the URL polyfill as a dev dependency.
+        var resolved = this._resolveSrc(this.src);
+        // Remove query parts, get file name.
+        return resolved.replace(/[?|#].*/g, '').split('/').pop();
+      },
+
+      _computeImgHidden: function() {
+        return !!this.sizing;
+      },
+
+      _widthChanged: function() {
+        this.style.width = isNaN(this.width) ? this.width : this.width + 'px';
+      },
+
+      _heightChanged: function() {
+        this.style.height = isNaN(this.height) ? this.height : this.height + 'px';
+      },
+
+      _loadStateObserver: function(src, preventLoad) {
+        var newResolvedSrc = this._resolveSrc(src);
+        if (newResolvedSrc === this._resolvedSrc) {
+          return;
+        }
+
+        this._resolvedSrc = '';
+        this.$.img.removeAttribute('src');
+        this.$.sizedImgDiv.style.backgroundImage = '';
+
+        if (src === '' || preventLoad) {
+          this._setLoading(false);
+          this._setLoaded(false);
+          this._setError(false);
+        } else {
+          this._resolvedSrc = newResolvedSrc;
+          this.$.img.src = this._resolvedSrc;
+          this.$.sizedImgDiv.style.backgroundImage = 'url("' + this._resolvedSrc + '")';
+
+          this._setLoading(true);
+          this._setLoaded(false);
+          this._setError(false);
+        }
+      },
+
+      _placeholderChanged: function() {
+        this.$.placeholder.style.backgroundImage =
+          this.placeholder ? 'url("' + this.placeholder + '")' : '';
+      },
+
+      _transformChanged: function() {
+        var sizedImgDivStyle = this.$.sizedImgDiv.style;
+        var placeholderStyle = this.$.placeholder.style;
+
+        sizedImgDivStyle.backgroundSize =
+        placeholderStyle.backgroundSize =
+          this.sizing;
+
+        sizedImgDivStyle.backgroundPosition =
+        placeholderStyle.backgroundPosition =
+          this.sizing ? this.position : '';
+
+        sizedImgDivStyle.backgroundRepeat =
+        placeholderStyle.backgroundRepeat =
+          this.sizing ? 'no-repeat' : '';
+      },
+
+      _resolveSrc: function(testSrc) {
+        var resolved = Polymer.ResolveUrl.resolveUrl(testSrc, this.$.baseURIAnchor.href);
+        // NOTE: Use of `URL` was removed here because IE11 doesn't support
+        // constructing it. If this ends up being problematic, we should
+        // consider reverting and adding the URL polyfill as a dev dependency.
+        if (resolved[0] === '/') {
+          // In IE location.origin might not work
+          // https://connect.microsoft.com/IE/feedback/details/1763802/location-origin-is-undefined-in-ie-11-on-windows-10-but-works-on-windows-7
+          resolved = (location.origin || location.protocol + '//' + location.host) + resolved;
+        }
+        return resolved;
+      }
+    });
+  </script>
+</dom-module>
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+--><!--
+Material design: [Cards](https://www.google.com/design/spec/components/cards.html)
+
+`paper-card` is a container with a drop shadow.
+
+Example:
+
+    <paper-card heading="Card Title">
+      <div class="card-content">Some content</div>
+      <div class="card-actions">
+        <paper-button>Some action</paper-button>
+      </div>
+    </paper-card>
+
+Example - top card image:
+
+    <paper-card heading="Card Title" image="/path/to/image.png" alt="image">
+      ...
+    </paper-card>
+
+### Accessibility
+
+By default, the `aria-label` will be set to the value of the `heading` attribute.
+
+### Styling
+
+The following custom properties and mixins are available for styling:
+
+Custom property | Description | Default
+----------------|-------------|----------
+`--paper-card-background-color` | The background color of the card | `--primary-background-color`
+`--paper-card-header-color` | The color of the header text | `#000`
+`--paper-card-header` | Mixin applied to the card header section | `{}`
+`--paper-card-header-text` | Mixin applied to the title in the card header section | `{}`
+`--paper-card-header-image` | Mixin applied to the image in the card header section | `{}`
+`--paper-card-header-image-text` | Mixin applied to the text overlapping the image in the card header section | `{}`
+`--paper-card-content` | Mixin applied to the card content section| `{}`
+`--paper-card-actions` | Mixin applied to the card action section | `{}`
+`--paper-card` | Mixin applied to the card | `{}`
+
+@group Paper Elements
+@element paper-card
+@demo demo/index.html
+-->
+
+<dom-module id="paper-card" assetpath="../bower_components/paper-card/">
+  <template>
+    <style include="paper-material-styles">
+      :host {
+        display: inline-block;
+        position: relative;
+        box-sizing: border-box;
+        background-color: var(--paper-card-background-color, var(--primary-background-color));
+        border-radius: 2px;
+
+        @apply --paper-font-common-base;
+        @apply --paper-card;
+      }
+
+      /* IE 10 support for HTML5 hidden attr */
+      [hidden] {
+        display: none !important;
+      }
+
+      .header {
+        position: relative;
+        border-top-left-radius: inherit;
+        border-top-right-radius: inherit;
+        overflow: hidden;
+
+        @apply --paper-card-header;
+      }
+
+      .header iron-image {
+        display: block;
+        width: 100%;
+        --iron-image-width: 100%;
+        pointer-events: none;
+
+        @apply --paper-card-header-image;
+      }
+
+      .header .title-text {
+        padding: 16px;
+        font-size: 24px;
+        font-weight: 400;
+        color: var(--paper-card-header-color, #000);
+
+        @apply --paper-card-header-text;
+      }
+
+      .header .title-text.over-image {
+        position: absolute;
+        bottom: 0px;
+
+        @apply --paper-card-header-image-text;
+      }
+
+      :host ::slotted(.card-content) {
+        padding: 16px;
+        position:relative;
+
+        @apply --paper-card-content;
+      }
+
+      :host ::slotted(.card-actions) {
+        border-top: 1px solid #e8e8e8;
+        padding: 5px 16px;
+        position:relative;
+
+        @apply --paper-card-actions;
+      }
+
+      :host([elevation="1"]) {
+        @apply --paper-material-elevation-1;
+      }
+
+      :host([elevation="2"]) {
+        @apply --paper-material-elevation-2;
+      }
+
+      :host([elevation="3"]) {
+        @apply --paper-material-elevation-3;
+      }
+
+      :host([elevation="4"]) {
+        @apply --paper-material-elevation-4;
+      }
+
+      :host([elevation="5"]) {
+        @apply --paper-material-elevation-5;
+      }
+    </style>
+
+    <div class="header">
+      <iron-image hidden$="[[!image]]" aria-hidden$="[[_isHidden(image)]]" src="[[image]]" alt="[[alt]]" placeholder="[[placeholderImage]]" preload="[[preloadImage]]" fade="[[fadeImage]]"></iron-image>
+      <div hidden$="[[!heading]]" class$="title-text [[_computeHeadingClass(image)]]">[[heading]]</div>
+    </div>
+
+    <slot></slot>
+  </template>
+
+  <script>
+    Polymer({
+      is: 'paper-card',
+
+      properties: {
+        /**
+         * The title of the card.
+         */
+        heading: {
+          type: String,
+          value: '',
+          observer: '_headingChanged'
+        },
+
+        /**
+         * The url of the title image of the card.
+         */
+        image: {
+          type: String,
+          value: ''
+        },
+
+        /**
+         * The text alternative of the card's title image.
+         */
+        alt: {
+          type: String
+        },
+
+        /**
+         * When `true`, any change to the image url property will cause the
+         * `placeholder` image to be shown until the image is fully rendered.
+         */
+        preloadImage: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * When `preloadImage` is true, setting `fadeImage` to true will cause the
+         * image to fade into place.
+         */
+        fadeImage: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * This image will be used as a background/placeholder until the src image has
+         * loaded. Use of a data-URI for placeholder is encouraged for instant rendering.
+         */
+        placeholderImage: {
+          type: String,
+          value: null
+        },
+
+        /**
+         * The z-depth of the card, from 0-5.
+         */
+        elevation: {
+          type: Number,
+          value: 1,
+          reflectToAttribute: true
+        },
+
+        /**
+         * Set this to true to animate the card shadow when setting a new
+         * `z` value.
+         */
+        animatedShadow: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * Read-only property used to pass down the `animatedShadow` value to
+         * the underlying paper-material style (since they have different names).
+         */
+        animated: {
+          type: Boolean,
+          reflectToAttribute: true,
+          readOnly: true,
+          computed: '_computeAnimated(animatedShadow)'
+        }
+      },
+
+      /**
+       * Format function for aria-hidden. Use the ! operator results in the
+       * empty string when given a falsy value.
+       */
+      _isHidden: function(image) {
+        return image ? 'false' : 'true';
+      },
+
+      _headingChanged: function(heading) {
+        var currentHeading = this.getAttribute('heading'),
+            currentLabel = this.getAttribute('aria-label');
+
+        if (typeof currentLabel !== 'string' || currentLabel === currentHeading) {
+          this.setAttribute('aria-label', heading);
+        }
+      },
+
+      _computeHeadingClass: function(image) {
+        return image ? ' over-image' : '';
+      },
+
+      _computeAnimated: function(animatedShadow) {
+        return animatedShadow;
+      }
+    });
+  </script>
+</dom-module>
+</div><dom-module id="my-home">
+  <template>
+    <style include="shared-styles">
+      :host {
+        display: block;
+        padding: 10px;
+      }
+
+      .link {
+        cursor: auto;
+        text-decoration: none;
+      }
+
+      #button-link {
+        background-color: var(--default-primary-color);
+        color: #fff;
+      }
+
+      .drawer-list {
+        margin: 0 20px;
+      }
+
+      .drawer-list a {
+        display: block;
+        padding: 0 16px;
+        text-decoration: none;
+        color: var(--accent-color);
+        line-height: 40px;
+      }
+
+      .drawer-list a.iron-selected {
+        color: black;
+        font-weight: bold;
+      }
+
+      .container {
+        display: -webkit-box;
+        display: -ms-flexbox;
+        display: flex;
+        -webkit-box-pack: center;
+            -ms-flex-pack: center;
+                justify-content: center;
+        -ms-flex-wrap: wrap;
+            flex-wrap: wrap;
+        margin-top: 15px;
+        padding: 1.5%;
+        -webkit-box-sizing: border-box;
+        box-sizing: border-box;
+      }
+
+      .cafe-header {
+        @apply --paper-font-headline;
+      }
+
+      .cafe-light {
+        color: var(--paper-grey-600);
+      }
+
+      .cafe-location {
+        float: right;
+        font-size: 15px;
+        vertical-align: middle;
+      }
+
+      .welcome {
+        min-height: 110px;
+        background-size: cover;
+        background-position: center center;
+        background-repeat: no-repeat;
+        background-image: url('../images/image.jpg');
+        margin-bottom: 16px;
+        margin-top:16px;
+      }
+
+      .emailTest {
+        display: -webkit-box;
+        display: -ms-flexbox;
+        display: flex;
+        -webkit-box-orient: horizontal;
+        -webkit-box-direction: normal;
+            -ms-flex-direction: row;
+                flex-direction: row;
+        -webkit-box-align: center;
+            -ms-flex-align: center;
+                align-items: center;
+        font-size: 18px;
+        font-weight: lighter;
+      }
+
+      .separator {
+        padding: 16px;
+        font-size: 14px;
+        font-weight: lighter;
+        color: #aaa;
+        border-top: 1px solid var(--divider-color);
+      }
+
+      .link {
+        cursor: auto;
+        text-decoration: none;
+      }
+
+      #button-link {
+        background-color: var(--default-primary-color);
+        color: #fff;
+      }
+
+      .completed {
+        color: var(--accent-color);
+      }
+      
+      app-drawer-layout:not([narrow]) [drawer-toggle] {
+        display: none;
+      }
+
+      app-header {
+        background-color: var(--dark-primary-color);
+        color: var(--text-primary-color);
+      }
+
+      app-header paper-icon-button {
+        --paper-icon-button-ink-color: white;
+      }
+
+      paper-card {
+        width: 400px;
+        position: relative;
+        margin-bottom: 20px;
+        margin-right: 10px;
+        margin-left: 10px;
+        --paper-card-header-image:{
+          -webkit-transition: all 0.1s;
+          -o-transition: all 0.1s;
+          transition: all 0.1s;
+          height: 256px;
+          -o-object-fit: cover;
+            object-fit: cover;
+          -webkit-filter: grayscale(.7);
+          filter: grayscale(.7);
+        };
+      }
+
+      iron-image {
+        height: 256px;
+        -webkit-transition: all 0.1s;
+        -o-transition: all 0.1s;
+        transition: all 0.1s;
+        -o-object-fit: cover;
+          object-fit: cover;
+        -webkit-filter: grayscale(.7);
+        filter: grayscale(.7);
+      }
+
+      paper-card:hover {
+        @apply --shadow-elevation-12dp
+      }
+
+      paper-card:hover iron-image{
+        -webkit-filter: none;
+        filter: none;
+        -webkit-transition: all 0.1s;
+        -o-transition: all 0.1s;
+        transition: all 0.1s;
+        -webkit-transform: scale(1.01);
+        -ms-transform: scale(1.01);
+            transform: scale(1.01);
+      }
+
+      @media (max-width: 300px) {
+        paper-card {
+          width: 100%;
+        }
+      }
+
+      iron-icon.star {
+        --iron-icon-width: 16px;
+        --iron-icon-height: 16px;
+        color: var(--paper-amber-500);
+      }
+
+      iron-icon.star.grey{
+        color: var(--paper-grey-500);
+      }
+    </style>
+
+    <firebase-auth id="FBAuth" user="{{user}}">
+    </firebase-auth>
+
+    <firebase-query id="FBQuery" path="/cases" data="{{userCases}}">
+    </firebase-query>
+
+    <firebase-query id="FBSave" path="/users/[[user.uid]]/cases" data="{{casesDone}}">
+    </firebase-query>
+
+    <app-drawer-layout fullbleed="">
+      <!-- Drawer content -->
+      <app-drawer id="drawer" slot="drawer">
+        <div style="height: 100%; overflow: auto;">
+        <div class="welcome"></div>
+        <!--<div class="separator">First session</div> -->
+        <div class="tags">
+          
+          
+          <paper-listbox selected="{{filter}}" attr-for-selected="label" selectable=".label">
+            <!--<div class="separator">Filter</div>
+            <paper-item label="all" class="label">All cases ([[allCases.length]])</paper-item>
+            <paper-item label="completed" class="label"> Completed ([[completed]])</paper-item>
+            <paper-item label="todo" class="label">To do ([[todo]])</paper-item> -->
+           
+            <template is="dom-repeat" items="{{tags}}" as="tag">
+                <div class="separator"></div>
+              <paper-item label$="[[tag.value]]" class="label">[[tag.value]] ([[tag.count]]) </paper-item>
+            </template>
+            
+            -<div class="separator">Filter</div>
+            <paper-item label="all" class="label">All cases ([[allCases.length]])</paper-item>
+            <paper-item label="completed" class="label"> Completed ([[completed]])</paper-item>
+            <paper-item label="todo" class="label">To do ([[todo]])</paper-item>
+
+          </paper-listbox> 
+        </div>
+
+        </div>
+
+      </app-drawer>
+
+      <!-- Main content -->
+      <app-header-layout has-scrolling-region="">
+
+        <app-header slot="header" condenses="" reveals="" effects="waterfall">
+          <app-toolbar>
+            <paper-icon-button icon="my-icons:menu" drawer-toggle=""></paper-icon-button>
+            <div main-title="">Dline - Web medical tools</div>
+            <div class="emailTest">
+              <div>{{user.email}}</div><paper-icon-button icon="icons:exit-to-app" on-tap="_handleLogout"></paper-icon-button>
+            </div>
+          </app-toolbar>
+        </app-header>
+
+        <div class="container">
+
+          <template is="dom-repeat" items="{{allCases}}" as="mycase" filter="{{_filterCases(filter)}}">
+            <paper-card>
+              <!--<iron-image style="width:400px; height:256ps; background-color: lightgray;"
+                sizing="cover" preload src="[[mycase.cover]]"></iron-image>
+              </iron-image>-->
+              <div class="card-content">
+                <div class="cafe-header">[[mycase.title]]
+                  <div class="cafe-location cafe-light">
+                    <template is="dom-if" if="{{mycase.completed}}">
+                      <iron-icon class="completed" icon="icons:done"></iron-icon>
+                      <span class="completed"> [[mycase.tags]] : Completed</span>
+                    </template>
+                    <template is="dom-if" if="{{!mycase.completed}}">
+                      <iron-icon icon="icons:clear"></iron-icon>
+                      <span> [[mycase.tags]] : Not done</span>
+                    </template>
+                  </div>
+                </div>
+                <!--<div class="cafe-rating">
+                  <iron-icon class$="{{_fillStar(1, mycase.difficulty)}}" icon="star"></iron-icon>
+                  <iron-icon class$="{{_fillStar(2, mycase.difficulty)}}" icon="star"></iron-icon>
+                  <iron-icon class$="{{_fillStar(3, mycase.difficulty)}}" icon="star"></iron-icon>
+                  <iron-icon class$="{{_fillStar(4, mycase.difficulty)}}" icon="star"></iron-icon>
+                  <iron-icon class$="{{_fillStar(5, mycase.difficulty)}}" icon="star"></iron-icon>
+                </div>
+                <p>Author・[[mycase.author]]</p>-->
+                <p class="cafe-light">[[mycase.description]]</p>
+              </div>
+              
+              <div class="card-actions">
+                <div class="horizontal justified">
+                  <a class="link" name="view3" href="case/[[mycase.id]]">
+                    <paper-button id="button-link">Open</paper-button></a>
+                  <!--<paper-button disabled>Contouring</paper-button> -->
+                </div>
+              </div>
+            </paper-card>
+
+          </template>
+
+        </div>
+      </app-header-layout>
+    </app-drawer-layout>
+  </template>
+
+  <script>
+    class MyHome extends Polymer.GestureEventListeners(Polymer.Element) {
+      static get is() { return 'my-home'; }
+
+      static get properties() {
+        return {
+          page: {
+            type: String,
+            reflectToAttribute: true,
+          },
+          tags: {
+            type: Array,
+            value: [],
+          },
+          user: {
+            type: Object,
+            value: {},
+            observer: '_userChanged',
+          },
+          userCases: {
+            type: Array,
+            value: [],
+          },
+          allCases: {
+            type: Array,
+            value: [],
+          },
+          completed: {
+            type: Number,
+            computed: '_computeCompleted(allCases)',
+          },
+          todo: {
+            type: Number,
+            computed: '_computeTodo(allCases)',
+            notify: true,
+          },
+          todoList: {
+            type: Array,
+            computed: '_computeTodoList(allCases)',
+            notify: true,
+          },
+          casesDone: {
+            type: Array,
+          },
+          filter: {
+            type: String,
+            value: 'all',
+          },
+        };
+      }
+
+      static get observers() {
+        return [
+          '_userCasesChanged(userCases.splices)',
+          '_casesDoneChanged(casesDone.splices)',
+        ];
+      }
+
+      _userChanged(user) {
+        console.log(user);
+      }
+
+      _userCasesChanged(userCases) {
+        if (userCases === undefined) {
+          return;
+        }
+
+        const tagSet = {};
+        const object = userCases.indexSplices[0].object;
+        for (const singlecase of object) {
+          const tagList = singlecase.tags;
+          for (const tag of tagList) {
+            if (tagSet[tag]) {
+              tagSet[tag] += 1;
+            } else {
+              tagSet[tag] = 1;
+            }
+          }
+        }
+
+        const tagArray = [];
+        for(const value in tagSet) {
+          tagArray.push({
+            value: value,
+            count: tagSet[value],
+          });
+        }
+
+        this.set('tags', tagArray);
+        this.allCases = [];
+        this.set('allCases', userCases.indexSplices[0].object);
+      }
+
+      _casesDoneChanged(casesDone) {
+        if (casesDone === undefined) {
+          return;
+        }
+        const index = casesDone.indexSplices[0].index;
+        const object = casesDone.indexSplices[0].object;
+        const newCase = object[index];
+
+        for (let i=0; i<this.allCases.length; i++) {
+          if (newCase.id === this.allCases[i].id){
+           this.set(['allCases', i, 'completed'], true);
+           this.allCases = this.allCases.slice();
+          }
+        }
+      }
+
+      _handleLogout() {
+        this.$.FBAuth.signOut();
+      }
+
+      _fillStar(starIndex, difficulty) {
+        return (starIndex <= difficulty) ? 'star' : 'star grey';
+      }
+
+      _filterCases(filter) {
+        if(filter === 'all') {
+          return function(mycase) {
+            return true;
+          };
+        } else if (filter === 'completed') {
+          return function(mycase) {
+            return mycase.completed;
+          };
+        } else if (filter === 'todo') {
+          return function(mycase) {
+            return !mycase.completed;
+          };
+        } else {
+          return function(mycase) {
+            return mycase.tags.indexOf(filter) != -1;
+          };
+        }
+      }
+
+      _computeCompleted(cases) {
+        const completed = cases.filter((acase) => acase.completed);
+        return completed.length;
+      }
+
+      _computeTodo(cases) {
+        const todo = cases.filter((acase) => !acase.completed);
+        return todo.length;
+      }
+
+      _computeTodoList(cases) {
+        const todo = cases.filter((acase) => !acase.completed);
+        return todo;
+      }
+    }
+
+    window.customElements.define(MyHome.is, MyHome);
+  </script>
+</dom-module>
